@@ -1,0 +1,65 @@
+{
+  "expo": {
+    "name": "مدرسة الإمام الرضا القرآنية",
+    "slug": "madrasat-al-imam-ridha",
+    "owner": "ridha-quran-school",
+    "version": "1.0.2",
+    "orientation": "portrait",
+    "icon": "./assets/images/logo.png",
+    "scheme": "imam-ridha-school",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "buildNumber": "3",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "تحديد مواعيد الصلاة واتجاه القبلة"
+      }
+    },
+    "android": {
+      "package": "com.imamridha.iraqiadhan",
+      "versionCode": 3,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/logo.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/logo.png"
+    },
+    "assetBundlePatterns": [
+      "assets/images/*",
+      "assets/fonts/*",
+      "assets/sounds/*"
+    ],
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/logo.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF"
+        }
+      ],
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e35c3397-7038-4976-b104-9059911da7c2"
+      }
+    }
+  }
+}
