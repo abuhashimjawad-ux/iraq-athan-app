@@ -32,7 +32,7 @@ jobs:
 
       - name: Build APK locally (no EAS worker quota used)
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_TOKEN: ${{ secrets.ADHAN_FINAL_BUILD }}
         run: eas build --local -p android --profile preview --non-interactive --output ./iraqi-adhan.apk
 
       - name: Upload APK as artifact
