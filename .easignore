@@ -11,6 +11,7 @@ node_modules/
 .expo/
 .expo-shared/
 dist/
+dist-check/
 web-build/
 .metro-cache/
 .metro-health-check*
@@ -44,4 +45,5 @@ Thumbs.db
 *.key
 *.mobileprovision
 
-# Keep bundled audio samples inside the app build
+# Full audio files are now served from GitHub Releases - exclude from upload
+assets/sounds/

@@ -86,7 +86,7 @@ export default function NetworkIndicator() {
 
 export function useNetworkStatus() {
   const [isConnected, setIsConnected] = useState(getOnlineStatus());
-  const [isLoading, setIsLoading] = useState(false);
+  const isLoading = false;
 
   useEffect(() => {
     if (supportsWindowEvents()) {

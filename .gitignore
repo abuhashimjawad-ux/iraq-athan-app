@@ -34,6 +34,9 @@ yarn-error.*
 # local env files
 .env*.local
 
+# Full audio files are served from GitHub Releases - too large for repo
+assets/sounds/
+
 # typescript
 *.tsbuildinfo
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,24 +16,47 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import { Audio, type AVPlaybackStatus } from 'expo-av';
 import { getAudioUri, initializeAudioCache, clearAudioCache } from '../../utils/audioCache';
-import { getLocalAudioSource } from '../../constants/localAudioMap';
+import { getLocalAudioSource, getLocalPerformerName } from '../../constants/localAudioMap';
 
 const ENV_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
+function getHostFromValue(value?: string) {
+  return String(value || '')
+    .trim()
+    .replace(/^[a-z]+:\/\//i, '')
+    .split('/')[0]
+    .split(':')[0]
+    .toLowerCase();
+}
+
+function isPrivateHost(host: string) {
+  return /^(localhost|127\.0\.0\.1|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/i.test(host);
+}
+
+function isExpoHostedHost(host: string) {
+  return /(^|\.)(exp\.direct|exp\.host|expo\.dev|expo\.io)$/i.test(host);
+}
+
 function resolveBackendUrl() {
+  const previewHost = getHostFromValue(
+    (Constants.expoConfig as any)?.hostUri ||
+      (Constants as any)?.expoGoConfig?.debuggerHost ||
+      (Constants as any)?.manifest2?.extra?.expoGo?.debuggerHost ||
+      ''
+  );
+
   const explicitUrl = String(ENV_BACKEND_URL || '').trim().replace(/\/$/, '');
   if (explicitUrl) {
-    return explicitUrl;
+    const explicitHost = getHostFromValue(explicitUrl);
+    if (!isExpoHostedHost(previewHost) || !isPrivateHost(explicitHost)) {
+      return explicitUrl;
+    }
+    return '';
   }
 
-  const hostUri =
-    (Constants.expoConfig as any)?.hostUri ||
-    (Constants as any)?.expoGoConfig?.debuggerHost ||
-    (Constants as any)?.manifest2?.extra?.expoGo?.debuggerHost ||
-    '';
-  const host = String(hostUri).split(':')[0];
-
-  return host ? `http://${host}:8000` : '';
+  return !isExpoHostedHost(previewHost) && isPrivateHost(previewHost)
+    ? `http://${previewHost}:8000`
+    : '';
 }
 
 const BACKEND_URL = resolveBackendUrl();
@@ -156,8 +179,15 @@ function AudioPlayerCard({
   branchName: string;
 }) {
   const localSource = getLocalAudioSource(branchId, audioNumber as 1 | 2);
+  const localPerformer = getLocalPerformerName(branchId, audioNumber as 1 | 2);
   const hasAudio = Boolean(localSource || (audioUrl && audioUrl.length > 0));
-  const displayPerformer = inferPerformerFromUrl(audioUrl, performer, branchId, audioNumber, branchName);
+  const displayPerformer = inferPerformerFromUrl(
+    audioUrl === 'local' ? '' : audioUrl,
+    performer || localPerformer,
+    branchId,
+    audioNumber,
+    branchName
+  );
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -203,12 +233,14 @@ function AudioPlayerCard({
         });
         
         if (localSource) {
+          // localSource is a Firebase Storage URL - download/cache then play
+          const { uri, isLocal: local } = await getAudioUri(localSource, branchId, audioNumber);
+          setIsLocal(local);
           const { sound: newSound } = await Audio.Sound.createAsync(
-            localSource,
+            { uri },
             { shouldPlay: true },
             onPlaybackStatusUpdate
           );
-          setIsLocal(true);
           setSound(newSound);
           setIsLoading(false);
           return;
@@ -306,24 +338,17 @@ function AudioPlayerCard({
 
 export default function BranchScreen() {
   const router = useRouter();
-  const { id, name, maqamName, color } = useLocalSearchParams<{
+  const { id, name, maqamName } = useLocalSearchParams<{
     id: string;
     name: string;
     maqamName: string;
-    color: string;
   }>();
 
   const [branch, setBranch] = useState<BranchDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const themeColor = '#CCA147';
 
-  useEffect(() => {
-    initializeAudioCache().catch(() => null);
-    clearAudioCache().catch(() => null);
-    fetchBranch();
-  }, [id]);
-
-  const fetchBranch = async () => {
+  const fetchBranch = useCallback(async () => {
     try {
       const branchName = String(name || '').trim();
       const specialBranchAudio = SPECIAL_BRANCH_AUDIO_BY_NAME[branchName];
@@ -363,8 +388,7 @@ export default function BranchScreen() {
 
       const data = await res.json();
       setBranch(data);
-    } catch (err) {
-      console.error('Error fetching branch:', err);
+    } catch {
       setBranch({
         id: String(id || ''),
         name: String(name || ''),
@@ -378,7 +402,13 @@ export default function BranchScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id, name]);
+
+  useEffect(() => {
+    initializeAudioCache().catch(() => null);
+    clearAudioCache().catch(() => null);
+    fetchBranch();
+  }, [fetchBranch]);
 
   const openTelegram = () => {
     Linking.openURL('https://t.me/ridhaquranschool');

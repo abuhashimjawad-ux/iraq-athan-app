@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Coordinates, CalculationMethod, PrayerTimes, Madhab } from 'adhan';
+import { schedulePrayerNotifications } from '../../utils/prayerNotifications';
 
 const PRAYER_NAMES_SUNNI = [
   { key: 'fajr', name: 'الفجر', icon: 'sunny-outline' as const, color: '#5B7FA5' },
@@ -66,10 +67,6 @@ function getTimeRemaining(target: Date): string {
   return `${minutes} دقيقة`;
 }
 
-async function schedulePrayerNotifications(prayerTimes: PrayerTimes, waqfType: string) {
-  // Notifications will work in production build only (not in Expo Go)
-}
-
 export default function PrayersScreen() {
   const [prayerTimes, setPrayerTimes] = useState<PrayerTimes | null>(null);
   const [loading, setLoading] = useState(true);
@@ -78,33 +75,19 @@ export default function PrayersScreen() {
   const [errorMsg, setErrorMsg] = useState('');
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
-  const loadSettings = useCallback(async () => {
-    try {
-      const saved = await AsyncStorage.getItem('waqf_type');
-      if (saved) setWaqfType(saved);
-    } catch (error) {
-      console.error('Error loading settings:', error);
-    }
-    fetchLocation();
-  }, [fetchLocation]);
+  // ref so recalculate stays stable and never causes cascading re-renders
+  const waqfTypeRef = useRef('sunni');
 
   const recalculate = useCallback((latitude: number, longitude: number) => {
+    const wt = waqfTypeRef.current;
     const coordinates = new Coordinates(latitude, longitude);
     const date = new Date();
-    const params = waqfType === 'shia' ? CalculationMethod.Tehran() : CalculationMethod.MuslimWorldLeague();
-    if (waqfType !== 'shia') params.madhab = Madhab.Shafi;
+    const params = wt === 'shia' ? CalculationMethod.Tehran() : CalculationMethod.MuslimWorldLeague();
+    if (wt !== 'shia') params.madhab = Madhab.Shafi;
     const times = new PrayerTimes(coordinates, date, params);
     setPrayerTimes(times);
-    schedulePrayerNotifications(times, waqfType);
-  }, [waqfType]);
-
-  useEffect(() => {
-    loadSettings();
-  }, [loadSettings]);
-
-  useEffect(() => {
-    if (coords) recalculate(coords.latitude, coords.longitude);
-  }, [coords, recalculate]);
+    schedulePrayerNotifications(times, wt, { latitude, longitude }).catch(console.error);
+  }, []); // stable - uses ref instead of closure
 
   const fetchLocation = useCallback(async () => {
     try {
@@ -134,6 +117,31 @@ export default function PrayersScreen() {
       setLoading(false);
     }
   }, [recalculate]);
+
+  const loadSettings = useCallback(async () => {
+    try {
+      const saved = await AsyncStorage.getItem('waqf_type');
+      if (saved) {
+        waqfTypeRef.current = saved; // update ref BEFORE calling fetchLocation
+        setWaqfType(saved);
+      }
+    } catch (error) {
+      console.error('Error loading settings:', error);
+    }
+    await fetchLocation();
+  }, [fetchLocation]);
+
+  // runs once on mount only (fetchLocation and loadSettings are now stable)
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
+
+  const handleWaqfChange = useCallback(async (type: string) => {
+    waqfTypeRef.current = type;
+    setWaqfType(type);
+    await AsyncStorage.setItem('waqf_type', type);
+    if (coords) recalculate(coords.latitude, coords.longitude);
+  }, [coords, recalculate]);
 
   const prayers = waqfType === 'shia' ? PRAYER_NAMES_SHIA : PRAYER_NAMES_SUNNI;
   const nextPrayer = prayerTimes ? getNextPrayer(prayerTimes, waqfType) : null;
@@ -221,12 +229,12 @@ export default function PrayersScreen() {
               <View style={styles.toggleContainer}>
                 <TouchableOpacity testID="toggle-sunni"
                   style={[styles.toggleBtn, waqfType === 'sunni' && styles.toggleActive]}
-                  onPress={async () => { setWaqfType('sunni'); await AsyncStorage.setItem('waqf_type', 'sunni'); }}>
+                  onPress={() => handleWaqfChange('sunni')}>
                   <Text style={[styles.toggleText, waqfType === 'sunni' && styles.toggleTextActive]}>سني (5)</Text>
                 </TouchableOpacity>
                 <TouchableOpacity testID="toggle-shia"
                   style={[styles.toggleBtn, waqfType === 'shia' && styles.toggleActive]}
-                  onPress={async () => { setWaqfType('shia'); await AsyncStorage.setItem('waqf_type', 'shia'); }}>
+                  onPress={() => handleWaqfChange('shia')}>
                   <Text style={[styles.toggleText, waqfType === 'shia' && styles.toggleTextActive]}>شيعي (3)</Text>
                 </TouchableOpacity>
               </View>

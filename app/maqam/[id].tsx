@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -18,20 +18,43 @@ import { hasLocalAudio } from '../../constants/localAudioMap';
 
 const ENV_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
+function getHostFromValue(value?: string) {
+  return String(value || '')
+    .trim()
+    .replace(/^[a-z]+:\/\//i, '')
+    .split('/')[0]
+    .split(':')[0]
+    .toLowerCase();
+}
+
+function isPrivateHost(host: string) {
+  return /^(localhost|127\.0\.0\.1|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/i.test(host);
+}
+
+function isExpoHostedHost(host: string) {
+  return /(^|\.)(exp\.direct|exp\.host|expo\.dev|expo\.io)$/i.test(host);
+}
+
 function resolveBackendUrl() {
+  const previewHost = getHostFromValue(
+    (Constants.expoConfig as any)?.hostUri ||
+      (Constants as any)?.expoGoConfig?.debuggerHost ||
+      (Constants as any)?.manifest2?.extra?.expoGo?.debuggerHost ||
+      ''
+  );
+
   const explicitUrl = String(ENV_BACKEND_URL || '').trim().replace(/\/$/, '');
   if (explicitUrl) {
-    return explicitUrl;
+    const explicitHost = getHostFromValue(explicitUrl);
+    if (!isExpoHostedHost(previewHost) || !isPrivateHost(explicitHost)) {
+      return explicitUrl;
+    }
+    return '';
   }
 
-  const hostUri =
-    (Constants.expoConfig as any)?.hostUri ||
-    (Constants as any)?.expoGoConfig?.debuggerHost ||
-    (Constants as any)?.manifest2?.extra?.expoGo?.debuggerHost ||
-    '';
-  const host = String(hostUri).split(':')[0];
-
-  return host ? `http://${host}:8000` : '';
+  return !isExpoHostedHost(previewHost) && isPrivateHost(previewHost)
+    ? `http://${previewHost}:8000`
+    : '';
 }
 
 const BACKEND_URL = resolveBackendUrl();
@@ -59,8 +82,8 @@ function normalizeArabicName(value?: string) {
     .trim();
 }
 
-function getFallbackBranchId(branchName: string, maqamId: string, index: number) {
-  const mappedIds: Record<string, string> = {
+const FALLBACK_BRANCH_IDS = Object.fromEntries(
+  Object.entries({
     'المنصوري': 'mansouri',
     'الحديدي': 'hadidi',
     'الشطراوي': 'shatrawi',
@@ -83,6 +106,8 @@ function getFallbackBranchId(branchName: string, maqamId: string, index: number)
     'الحسيني': 'husseini',
     'الأورفة': 'urfa',
     'الاورفة': 'urfa',
+    'الأورفى': 'urfa',
+    'الاورفى': 'urfa',
     'أبو عطا': 'abu_ata',
     'ابو عطا': 'abu_ata',
     'الشرقي دوكاه': 'sharqi_dukah',
@@ -108,14 +133,18 @@ function getFallbackBranchId(branchName: string, maqamId: string, index: number)
     'الشرقي رست والاصفهان': 'sharqi_rast',
     'الشرقي رست والإصفهان': 'sharqi_rast',
     'الحليلاوي': 'halilawi',
+    'الحليوي': 'halilawi',
     'الكاركرد': 'karkurd',
     'الأثر كرد': 'athar_kurd',
     'الاثر كرد': 'athar_kurd',
     'اللامي والحليوي': 'lami_halawi',
+    'اللامي والحليلاوي': 'lami_halawi',
     'اللامي المبرقع': 'lami_mubarqa',
-  };
+  }).map(([key, value]) => [normalizeArabicName(key), value])
+) as Record<string, string>;
 
-  return mappedIds[normalizeArabicName(branchName)] || `${maqamId}_static_${index + 1}`;
+function getFallbackBranchId(branchName: string, maqamId: string, index: number) {
+  return FALLBACK_BRANCH_IDS[normalizeArabicName(branchName)] || `${maqamId}_static_${index + 1}`;
 }
 
 function buildStaticBranches(maqamId: string, apiBranches: Partial<BranchItem>[] = []): BranchItem[] {
@@ -144,28 +173,16 @@ function buildStaticBranches(maqamId: string, apiBranches: Partial<BranchItem>[]
 
 export default function MaqamScreen() {
   const router = useRouter();
-  const { id, name, color } = useLocalSearchParams<{
+  const { id, name } = useLocalSearchParams<{
     id: string;
     name: string;
-    color: string;
   }>();
   const [branches, setBranches] = useState<BranchItem[]>([]);
   const [maqamAudio, setMaqamAudio] = useState<{ audio1_url: string; audio2_url: string }>({ audio1_url: '', audio2_url: '' });
   const [loading, setLoading] = useState(false);
   const headerTitle = `مقام ${name || ''}`;
 
-  useEffect(() => {
-    const fallbackBranches = buildStaticBranches(String(id || ''));
-    setBranches(fallbackBranches);
-    setMaqamAudio({
-      audio1_url: hasLocalAudio(String(id || ''), 1) ? 'local' : '',
-      audio2_url: hasLocalAudio(String(id || ''), 2) ? 'local' : '',
-    });
-    setLoading(false);
-    fetchData();
-  }, [id]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     const fallbackBranches = buildStaticBranches(String(id || ''));
     setBranches(fallbackBranches);
 
@@ -193,11 +210,21 @@ export default function MaqamScreen() {
           setMaqamAudio({ audio1_url: current.audio1_url || '', audio2_url: current.audio2_url || '' });
         }
       }
-    } catch (err) {
-      console.error('Error fetching data:', err);
+    } catch {
       setBranches(fallbackBranches);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    const fallbackBranches = buildStaticBranches(String(id || ''));
+    setBranches(fallbackBranches);
+    setMaqamAudio({
+      audio1_url: hasLocalAudio(String(id || ''), 1) ? 'local' : '',
+      audio2_url: hasLocalAudio(String(id || ''), 2) ? 'local' : '',
+    });
+    setLoading(false);
+    fetchData();
+  }, [id, fetchData]);
 
   const themeColor = '#CCA147';
 

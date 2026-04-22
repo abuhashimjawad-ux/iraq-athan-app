@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { LocationCache } from '../../utils/offlineManager';
-import { useNetworkStatus } from '../../components/NetworkIndicator';
 
 const { width } = Dimensions.get('window');
 const COMPASS_SIZE = width - 80;
@@ -89,7 +88,6 @@ function getQiblaGuidance(qiblaAngle: number, heading: number) {
 }
 
 export default function QiblaScreen() {
-  const { isConnected } = useNetworkStatus();
   const [heading, setHeading] = useState(0);
   const [qiblaAngle, setQiblaAngle] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -100,103 +98,7 @@ export default function QiblaScreen() {
   const [isRefreshingLocation, setIsRefreshingLocation] = useState(false);
   const headingSubscription = useRef<any>(null);
 
-  useEffect(() => {
-    setupQibla();
-    return () => {
-      headingSubscription.current?.remove?.();
-    };
-  }, []);
-
-  const setupQibla = async () => {
-    try {
-      setErrorMsg('');
-      setIsRefreshingLocation(true);
-
-      // First, try to load cached location
-      const cachedLocation = await LocationCache.get();
-      
-      // Request permission
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      
-      if (status !== 'granted') {
-        // No permission - use cached location if available
-        if (cachedLocation) {
-          const angle = calculateQibla(cachedLocation.latitude, cachedLocation.longitude);
-          setQiblaAngle(angle);
-          setLocationName(cachedLocation.city || 'الموقع المحفوظ');
-          setIsOfflineMode(true);
-          await setupHeadingWatcher();
-          setLoading(false);
-          return;
-        }
-        
-        setErrorMsg('يرجى السماح بالوصول للموقع لتحديد اتجاه القبلة');
-        setLoading(false);
-        return;
-      }
-
-      try {
-        if (Platform.OS === 'android') {
-          try {
-            await Location.enableNetworkProviderAsync();
-          } catch (providerError) {
-            console.log('Network provider prompt skipped:', providerError);
-          }
-        }
-
-        // Try to get current location
-        const location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Highest,
-          mayShowUserSettingsDialog: true,
-        });
-
-        const { latitude, longitude } = location.coords;
-        const angle = calculateQibla(latitude, longitude);
-        setQiblaAngle(angle);
-
-        // Save location to cache
-        let cityName = '';
-        try {
-          const geocode = await Location.reverseGeocodeAsync({ latitude, longitude });
-          if (geocode.length > 0) {
-            const place = geocode[0];
-            cityName = place.city || place.region || place.country || '';
-            setLocationName(cityName);
-          }
-        } catch (e) {
-          console.log('Geocoding failed:', e);
-        }
-        
-        await LocationCache.save(latitude, longitude, (cityName || null) as any);
-        setIsOfflineMode(false);
-        
-      } catch (locationError) {
-        console.log('Location fetch error:', locationError);
-        
-        // Use cached location as fallback
-        if (cachedLocation) {
-          const angle = calculateQibla(cachedLocation.latitude, cachedLocation.longitude);
-          setQiblaAngle(angle);
-          setLocationName(cachedLocation.city || 'الموقع المحفوظ');
-          setIsOfflineMode(true);
-        } else {
-          throw locationError;
-        }
-      }
-
-      await setupHeadingWatcher();
-      setLoading(false);
-      
-    } catch (err) {
-      console.error('Qibla setup error:', err);
-      setErrorMsg('حدث خطأ في تحديد الموقع');
-      setLoading(false);
-    } finally {
-      setIsRefreshingLocation(false);
-    }
-  };
-
-  const setupHeadingWatcher = async () => {
+  const setupHeadingWatcher = useCallback(async () => {
     try {
       headingSubscription.current?.remove?.();
 
@@ -226,10 +128,96 @@ export default function QiblaScreen() {
       console.log('Heading watcher failed:', error);
       setCalibrationHint('قد تكون دقة البوصلة محدودة على هذا الجهاز.');
     }
-  };
+  }, []);
+
+  const setupQibla = useCallback(async () => {
+    try {
+      setErrorMsg('');
+      setIsRefreshingLocation(true);
+
+      const cachedLocation = await LocationCache.get();
+      const { status } = await Location.requestForegroundPermissionsAsync();
+
+      if (status !== 'granted') {
+        if (cachedLocation) {
+          const angle = calculateQibla(cachedLocation.latitude, cachedLocation.longitude);
+          setQiblaAngle(angle);
+          setLocationName(cachedLocation.city || 'الموقع المحفوظ');
+          setIsOfflineMode(true);
+          await setupHeadingWatcher();
+          setLoading(false);
+          return;
+        }
+
+        setErrorMsg('يرجى السماح بالوصول للموقع لتحديد اتجاه القبلة');
+        setLoading(false);
+        return;
+      }
+
+      try {
+        if (Platform.OS === 'android') {
+          try {
+            await Location.enableNetworkProviderAsync();
+          } catch (providerError) {
+            console.log('Network provider prompt skipped:', providerError);
+          }
+        }
+
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Highest,
+          mayShowUserSettingsDialog: true,
+        });
+
+        const { latitude, longitude } = location.coords;
+        const angle = calculateQibla(latitude, longitude);
+        setQiblaAngle(angle);
+
+        let cityName = '';
+        try {
+          const geocode = await Location.reverseGeocodeAsync({ latitude, longitude });
+          if (geocode.length > 0) {
+            const place = geocode[0];
+            cityName = place.city || place.region || place.country || '';
+            setLocationName(cityName);
+          }
+        } catch (error) {
+          console.log('Geocoding failed:', error);
+        }
+
+        await LocationCache.save(latitude, longitude, (cityName || null) as any);
+        setIsOfflineMode(false);
+      } catch (locationError) {
+        console.log('Location fetch error:', locationError);
+
+        if (cachedLocation) {
+          const angle = calculateQibla(cachedLocation.latitude, cachedLocation.longitude);
+          setQiblaAngle(angle);
+          setLocationName(cachedLocation.city || 'الموقع المحفوظ');
+          setIsOfflineMode(true);
+        } else {
+          throw locationError;
+        }
+      }
+
+      await setupHeadingWatcher();
+      setLoading(false);
+    } catch (err) {
+      console.error('Qibla setup error:', err);
+      setErrorMsg('حدث خطأ في تحديد الموقع');
+      setLoading(false);
+    } finally {
+      setIsRefreshingLocation(false);
+    }
+  }, [setupHeadingWatcher]);
+
+  useEffect(() => {
+    setupQibla();
+    return () => {
+      headingSubscription.current?.remove?.();
+    };
+  }, [setupQibla]);
 
   const qiblaDifference = shortestAngleDifference(heading, qiblaAngle);
-  const qiblaRotation = qiblaDifference;
   const qiblaDirectionLabel = getDirectionLabel(qiblaAngle);
   const qiblaDifferenceText =
     Math.abs(qiblaDifference) <= 2
